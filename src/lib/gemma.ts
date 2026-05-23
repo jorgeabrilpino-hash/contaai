@@ -161,27 +161,52 @@ Clasifica este gasto y responde:
 
 type BotIntent = 'upload' | 'query_igv' | 'query_vencimiento' | 'query_facturas' | 'unknown'
 
-export async function classifyIntent(message: string): Promise<BotIntent> {
-  const raw = await callGemma4(
-    [
-      {
-        role: 'system',
-        content: `Eres el router del bot ContaAI.
-Clasifica el mensaje del usuario en una sola palabra.
-Responde ÚNICAMENTE con una de estas opciones exactas:
-upload | query_igv | query_vencimiento | query_facturas | unknown`,
-      },
-      {
-        role: 'user',
-        content: message,
-      },
-    ],
-    { maxTokens: 5, temperature: 0 }
-  )
+function detectIntentByKeywords(text: string): BotIntent | null {
+  const t = text.toLowerCase()
+  if (/subir|upload|factura|boleta|documento|comprobante|foto|imagen|adjunt|pdf|archivo/.test(t))
+    return 'upload'
+  if (/igv|impuesto.*venta|tax|tribut/.test(t))
+    return 'query_igv'
+  if (/venc|plazo|declar|cronograma|cuándo|cuando|fecha.*sunat|sunat.*fecha/.test(t))
+    return 'query_vencimiento'
+  if (/factura|boleta|pendiente|cuánta|cuanta|document|revisar|registro/.test(t))
+    return 'query_facturas'
+  return null
+}
 
-  const clean = raw.trim().toLowerCase().replace(/[^a-z_]/g, '')
-  const valid: BotIntent[] = ['upload', 'query_igv', 'query_vencimiento', 'query_facturas']
-  return valid.includes(clean as BotIntent) ? (clean as BotIntent) : 'unknown'
+export async function classifyIntent(message: string): Promise<BotIntent> {
+  // Keywords first — fast and reliable on free tier
+  const kwIntent = detectIntentByKeywords(message)
+  if (kwIntent) return kwIntent
+
+  // Gemma 4 for ambiguous messages
+  try {
+    const raw = await callGemma4(
+      [
+        {
+          role: 'system',
+          content: `Classify the user message into exactly one label.
+Respond with ONLY one of these exact strings, nothing else:
+upload
+query_igv
+query_vencimiento
+query_facturas
+unknown`,
+        },
+        {
+          role: 'user',
+          content: message,
+        },
+      ],
+      { maxTokens: 20, temperature: 0 }
+    )
+
+    const first = raw.trim().split(/\s+/)[0].toLowerCase().replace(/[^a-z_]/g, '')
+    const valid: BotIntent[] = ['upload', 'query_igv', 'query_vencimiento', 'query_facturas']
+    return valid.includes(first as BotIntent) ? (first as BotIntent) : 'unknown'
+  } catch {
+    return 'unknown'
+  }
 }
 
 // Wrapper con retry para rate limits de OpenRouter free tier
