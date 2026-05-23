@@ -50,7 +50,7 @@ export default function LoginPage() {
         <CardDescription>Ingresa tus credenciales para acceder</CardDescription>
       </CardHeader>
       <CardContent>
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} action="#" className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="email">Email</Label>
             <Input
