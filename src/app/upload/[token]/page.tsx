@@ -9,14 +9,20 @@ interface PageProps {
 export default async function UploadTokenPage({ params }: PageProps) {
   const { token } = await params
 
-  const admin = createAdminClient()
-  const { data: tokenData } = await admin
-    .from('upload_tokens')
-    .select('empresa_id, expires_at, empresas(nombre)')
-    .eq('token', token)
-    .eq('usado', false)
-    .gt('expires_at', new Date().toISOString())
-    .single()
+  let tokenData: { empresa_id: string; expires_at: string; empresas: unknown } | null = null
+  try {
+    const admin = createAdminClient()
+    const { data } = await admin
+      .from('upload_tokens')
+      .select('empresa_id, expires_at, empresas(nombre)')
+      .eq('token', token)
+      .eq('usado', false)
+      .gt('expires_at', new Date().toISOString())
+      .single()
+    tokenData = data
+  } catch {
+    notFound()
+  }
 
   if (!tokenData) {
     notFound()

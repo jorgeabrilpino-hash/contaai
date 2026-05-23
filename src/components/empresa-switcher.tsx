@@ -27,8 +27,10 @@ export function EmpresaSwitcher({ empresas }: EmpresaSwitcherProps) {
     const valid = empresas.find((e) => e.id === stored)
     const initial = valid ? valid.id : (empresas[0]?.id ?? '')
     setEmpresaId(initial)
-    if (initial && (!stored || !valid)) {
+    if (initial) {
       localStorage.setItem(STORAGE_KEY, initial)
+      // Notifica a otros componentes (DocumentosContent, etc.)
+      window.dispatchEvent(new CustomEvent('empresaChanged', { detail: initial }))
     }
   }, [empresas])
 
