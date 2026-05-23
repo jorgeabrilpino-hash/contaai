@@ -30,8 +30,18 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
-.env*
+# env files (credenciales — NUNCA subir)
+.env
+.env.local
+.env.production
+.env*.local
+
+# Archivos del agente de desarrollo (no necesarios para correr)
+CLAUDE.md
+AGENTS.md
+architecture.md
+prompts/
+skills/
 
 # vercel
 .vercel
