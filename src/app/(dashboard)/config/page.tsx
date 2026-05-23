@@ -52,7 +52,10 @@ export default function ConfigPage() {
     const res = await fetch('/api/telegram/generate-token', { method: 'POST' })
     const json = await res.json()
     if (res.ok && json.token) {
-      setProfile(prev => prev ? { ...prev, telegramToken: json.token } : prev)
+      setProfile(prev => ({
+        telegramId: prev?.telegramId ?? null,
+        telegramToken: json.token,
+      }))
     } else {
       setError(json.error ?? 'Error al generar el código.')
     }
