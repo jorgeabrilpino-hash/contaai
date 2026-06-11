@@ -10,6 +10,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
@@ -21,8 +22,17 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { toast } from 'sonner'
 import { UploadZone } from '@/components/upload-zone'
 import { createClient } from '@/lib/supabase/client'
+import { PCGE_CUENTAS } from '@/lib/pcge'
 import type { Documento, DocumentoEstado } from '@/types'
 
 const STORAGE_KEY = 'empresa_activa_id'
@@ -66,6 +76,9 @@ function DocumentosContent() {
   const [documentos, setDocumentos] = useState<Documento[]>([])
   const [loading, setLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
+  const [selectedDoc, setSelectedDoc] = useState<Documento | null>(null)
+  const [cuentaEdit, setCuentaEdit] = useState<string>('')
+  const [confirming, setConfirming] = useState(false)
 
   // Leer empresa activa de localStorage
   useEffect(() => {
@@ -115,6 +128,37 @@ function DocumentosContent() {
     if (empresaId) fetchDocumentos(empresaId, periodo)
   }
 
+  function openDetalle(doc: Documento) {
+    setSelectedDoc(doc)
+    setCuentaEdit(doc.cuenta_pcge ?? '')
+  }
+
+  async function handleConfirmDoc() {
+    if (!selectedDoc || !cuentaEdit) return
+    setConfirming(true)
+    try {
+      const res = await fetch('/api/documents/confirm', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          documento_id: selectedDoc.id,
+          cuenta_pcge: cuentaEdit,
+        }),
+      })
+      const data = (await res.json()) as { error?: string }
+      if (!res.ok) {
+        toast.error(data.error ?? 'Error al confirmar el documento')
+      } else {
+        toast.success('Documento confirmado')
+        setSelectedDoc(null)
+        if (empresaId) fetchDocumentos(empresaId, periodo)
+      }
+    } catch {
+      toast.error('Error de conexión')
+    }
+    setConfirming(false)
+  }
+
   // KPIs
   const totalIGV = documentos.reduce((sum, d) => sum + (d.igv ?? 0), 0)
   const pendientes = documentos.filter((d) => d.estado === 'pendiente').length
@@ -122,8 +166,8 @@ function DocumentosContent() {
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="border-b px-6 py-4 space-y-3">
-        <div className="flex items-center justify-between">
+      <div className="border-b px-4 md:px-6 py-4 space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <h1 className="text-xl font-semibold">Documentos</h1>
             <p className="text-sm text-muted-foreground">
@@ -139,7 +183,7 @@ function DocumentosContent() {
               )}
             </p>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
             <input
               type="month"
               value={periodo}
@@ -158,7 +202,7 @@ function DocumentosContent() {
       </div>
 
       {/* Tabla */}
-      <div className="flex-1 overflow-auto p-6">
+      <div className="flex-1 overflow-auto p-4 md:p-6">
         {!empresaId ? (
           <div className="text-center py-16 text-muted-foreground">
             <p className="font-medium">Selecciona una empresa en el menú lateral</p>
@@ -196,7 +240,11 @@ function DocumentosContent() {
               </TableHeader>
               <TableBody>
                 {documentos.map((doc) => (
-                  <TableRow key={doc.id}>
+                  <TableRow
+                    key={doc.id}
+                    onClick={() => openDetalle(doc)}
+                    className="cursor-pointer"
+                  >
                     <TableCell>
                       <Badge variant="outline" className="capitalize text-xs">
                         {doc.tipo}
@@ -242,11 +290,96 @@ function DocumentosContent() {
         )}
       </div>
 
+      {/* Dialog de detalle / confirmación */}
+      <Dialog open={selectedDoc !== null} onOpenChange={(v) => !v && setSelectedDoc(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Detalle del documento</DialogTitle>
+            <DialogDescription>
+              Revisa la clasificación sugerida por Gemma 4 y confírmala o corrígela.
+            </DialogDescription>
+          </DialogHeader>
+          {selectedDoc && (
+            <div className="space-y-4">
+              <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                <dt className="text-muted-foreground">Tipo</dt>
+                <dd className="font-medium capitalize">{selectedDoc.tipo}</dd>
+                <dt className="text-muted-foreground">Emisor</dt>
+                <dd className="font-medium truncate">{selectedDoc.razon_social ?? '—'}</dd>
+                <dt className="text-muted-foreground">RUC</dt>
+                <dd className="font-mono text-xs pt-0.5">{selectedDoc.ruc_emisor ?? '—'}</dd>
+                <dt className="text-muted-foreground">Fecha</dt>
+                <dd>{selectedDoc.fecha_emision ?? '—'}</dd>
+                <dt className="text-muted-foreground">Base / IGV</dt>
+                <dd className="tabular-nums">
+                  {selectedDoc.monto_base !== null ? `S/ ${selectedDoc.monto_base.toFixed(2)}` : '—'}
+                  {' / '}
+                  {selectedDoc.igv !== null ? `S/ ${selectedDoc.igv.toFixed(2)}` : '—'}
+                </dd>
+                <dt className="text-muted-foreground">Total</dt>
+                <dd className="font-semibold tabular-nums">
+                  {selectedDoc.total !== null ? `S/ ${selectedDoc.total.toFixed(2)}` : '—'}
+                </dd>
+                <dt className="text-muted-foreground">Estado</dt>
+                <dd><EstadoBadge estado={selectedDoc.estado} /></dd>
+                {selectedDoc.descripcion_ia && (
+                  <>
+                    <dt className="text-muted-foreground">Descripción IA</dt>
+                    <dd className="text-xs">{selectedDoc.descripcion_ia}</dd>
+                  </>
+                )}
+              </dl>
+
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium text-muted-foreground">Cuenta PCGE</p>
+                <Select value={cuentaEdit} onValueChange={setCuentaEdit}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Selecciona una cuenta" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {cuentaEdit &&
+                      !PCGE_CUENTAS.some((c) => c.codigo === cuentaEdit) && (
+                        <SelectItem value={cuentaEdit}>
+                          {cuentaEdit} — {selectedDoc.nombre_cuenta ?? 'Sugerida por IA'}
+                        </SelectItem>
+                      )}
+                    {PCGE_CUENTAS.map((c) => (
+                      <SelectItem key={c.codigo} value={c.codigo}>
+                        {c.codigo} — {c.nombre}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="flex flex-col-reverse sm:flex-row gap-2 sm:justify-end">
+                <Button variant="outline" onClick={() => setSelectedDoc(null)}>
+                  Cerrar
+                </Button>
+                <Button
+                  onClick={handleConfirmDoc}
+                  disabled={confirming || !cuentaEdit}
+                >
+                  {confirming
+                    ? 'Confirmando...'
+                    : selectedDoc.estado === 'confirmado'
+                      ? 'Actualizar cuenta'
+                      : 'Confirmar documento'}
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
       {/* Dialog de upload */}
       <Dialog open={dialogOpen} onOpenChange={(v) => !v && setDialogOpen(false)}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Subir comprobante</DialogTitle>
+            <DialogDescription>
+              Sube una factura o boleta en PDF, JPG o PNG. Gemma 4 extraerá los datos y clasificará la cuenta contable automáticamente.
+            </DialogDescription>
           </DialogHeader>
           <div className="mt-2">
             {empresaId && (

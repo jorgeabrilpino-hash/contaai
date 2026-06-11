@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { classifyIntent } from '@/lib/gemma'
+import { classifyIntent, chatContador, type ChatContext } from '@/lib/gemma'
 
 const TELEGRAM_API = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}`
 
@@ -12,22 +12,29 @@ async function sendMessage(chatId: number, text: string): Promise<void> {
   })
 }
 
+// Telegram corta la conexión si tardamos: avisar "escribiendo..." mientras
+// Gemma 4 piensa mejora mucho la sensación de chat real.
+async function sendTyping(chatId: number): Promise<void> {
+  await fetch(`${TELEGRAM_API}/sendChatAction`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chat_id: chatId, action: 'typing' }),
+  })
+}
+
 const INSTRUCCIONES_VINCULACION =
   `Para vincular tu cuenta:\n\n` +
   `1. Ve a <b>${process.env.NEXT_PUBLIC_APP_URL}/config</b>\n` +
-  `2. Haz clic en "Generar código de vinculación"\n` +
-  `3. Envíame: <code>/start TU_CÓDIGO</code>`
+  `2. Haz clic en "Conectar Telegram"\n` +
+  `3. Toca el botón "Abrir Telegram" o envíame: <code>/start TU_CÓDIGO</code>`
 
 const AYUDA_MESSAGE =
-  `🤖 <b>ContaAI Bot</b> — Comandos disponibles:\n\n` +
-  `📊 <b>Consultas rápidas:</b>\n` +
-  `• "igv del mes" — IGV acumulado del período actual\n` +
-  `• "facturas pendientes" — documentos por revisar\n` +
-  `• "cuándo vence" — próxima declaración SUNAT\n\n` +
-  `📎 <b>Subir documentos:</b>\n` +
-  `• "subir factura" — enlace seguro por 15 minutos\n\n` +
-  `🏢 <b>Cambiar empresa:</b>\n` +
-  `• /empresa [nombre]\n\n` +
+  `🤖 <b>ContaAI</b> — Soy tu asistente contable. Háblame con normalidad:\n\n` +
+  `💬 <i>"¿Cuánto IGV llevo este mes?"</i>\n` +
+  `💬 <i>"¿Cuándo vence mi declaración?"</i>\n` +
+  `💬 <i>"¿Qué cuenta PCGE uso para compras de gasolina?"</i>\n\n` +
+  `📎 <b>Subir documentos:</b> escribe "subir factura" y te genero un enlace seguro de 15 minutos.\n\n` +
+  `🏢 <b>Cambiar empresa:</b> /empresa [nombre]\n` +
   `📱 Dashboard: ${process.env.NEXT_PUBLIC_APP_URL}`
 
 // GET: register webhook with Telegram (call once after deploy)
@@ -43,6 +50,65 @@ export async function GET(): Promise<NextResponse> {
     }),
   })
   return NextResponse.json(await res.json())
+}
+
+type EmpresaRow = { id: string; nombre: string }
+
+// Datos agregados del período — única información que puede ver el bot.
+// NUNCA consulta RUCs, razones sociales ni montos individuales.
+async function buildContext(
+  admin: ReturnType<typeof createAdminClient>,
+  empresa: EmpresaRow,
+  empresas: EmpresaRow[],
+  contadorNombre: string | null,
+  periodo: string
+): Promise<ChatContext> {
+  const { data: docs } = await admin
+    .from('documentos')
+    .select('igv, monto_base, estado')
+    .eq('empresa_id', empresa.id)
+    .eq('periodo', periodo)
+
+  const rows = docs ?? []
+  const totalIGV = rows.reduce((s, d) => s + ((d.igv as number) ?? 0), 0)
+  const totalBase = rows.reduce((s, d) => s + ((d.monto_base as number) ?? 0), 0)
+  const confirmados = rows.filter(d => d.estado === 'confirmado').length
+
+  const now = new Date()
+  const vencimiento = new Date(now.getFullYear(), now.getMonth() + 1, 15)
+  const vencimientoDias = Math.ceil(
+    (vencimiento.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
+  )
+
+  return {
+    contadorNombre,
+    empresaNombre: empresa.nombre,
+    empresas: empresas.map(e => e.nombre),
+    periodo,
+    totalIGV,
+    totalBase,
+    totalDocs: rows.length,
+    confirmados,
+    pendientes: rows.length - confirmados,
+    vencimientoFecha: vencimiento.toLocaleDateString('es-PE', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+    }),
+    vencimientoDias,
+  }
+}
+
+// Respuesta de plantilla si Gemma 4 no está disponible
+function fallbackReply(ctx: ChatContext): string {
+  return (
+    `📊 <b>${ctx.empresaNombre} — ${ctx.periodo}</b>\n\n` +
+    `💰 IGV acumulado: <b>S/ ${ctx.totalIGV.toFixed(2)}</b>\n` +
+    `🧾 Base imponible: <b>S/ ${ctx.totalBase.toFixed(2)}</b>\n` +
+    `📄 Documentos: ${ctx.totalDocs} (✅ ${ctx.confirmados} · ⏳ ${ctx.pendientes})\n` +
+    `📅 Próxima declaración: ${ctx.vencimientoFecha} (${ctx.vencimientoDias} días)\n\n` +
+    `📎 Escribe "subir factura" para obtener un enlace de subida.`
+  )
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
@@ -71,9 +137,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (hasFile) {
     await sendMessage(
       chatId,
-      '🔒 <b>Los documentos se suben solo desde el dashboard web.</b>\n\n' +
+      '🔒 <b>Los documentos se suben solo desde el enlace seguro.</b>\n\n' +
       'Por seguridad, no procesamos archivos por Telegram.\n\n' +
-      '📎 Escribe "subir factura" para obtener un enlace seguro.'
+      '📎 Escribe "subir factura" y te genero un enlace válido por 15 minutos.'
     )
     return NextResponse.json({ ok: true })
   }
@@ -170,10 +236,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // 6. Handle /empresa NOMBRE — switch active empresa
   let empresa = empresas[0]
 
-  if (text.startsWith('/empresa ')) {
-    const nombreBuscado = text.replace('/empresa ', '').trim().toLowerCase()
-    const match = empresas.find(e => e.nombre.toLowerCase().includes(nombreBuscado))
+  if (text.startsWith('/empresa')) {
+    const nombreBuscado = text.replace('/empresa', '').trim().toLowerCase()
 
+    if (!nombreBuscado) {
+      const lista = empresas.map(e => `• ${e.nombre}`).join('\n')
+      await sendMessage(chatId, `🏢 Tus empresas:\n\n${lista}\n\nUsa: /empresa [nombre]`)
+      return NextResponse.json({ ok: true })
+    }
+
+    const match = empresas.find(e => e.nombre.toLowerCase().includes(nombreBuscado))
     if (match) {
       empresa = match
       await sendMessage(chatId, `✅ Empresa activa: <b>${match.nombre}</b>`)
@@ -184,112 +256,56 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ ok: true })
   }
 
-  // 7. Classify intent with Gemma 4
-  const periodo = new Date().toISOString().slice(0, 7)
-  let intent: string
-  try {
-    intent = await classifyIntent(text)
-  } catch {
-    intent = 'unknown'
+  if (text.startsWith('/ayuda') || text.startsWith('/help')) {
+    await sendMessage(chatId, AYUDA_MESSAGE)
+    return NextResponse.json({ ok: true })
   }
 
-  switch (intent) {
-    case 'upload': {
-      const expiresAt = new Date(Date.now() + 15 * 60 * 1000)
-      const { data: tokenData } = await admin
-        .from('upload_tokens')
-        .insert({
-          empresa_id: empresa.id,
-          user_id: profile.id,
-          expires_at: expiresAt.toISOString(),
-          usado: false,
-        })
-        .select('token')
-        .single()
+  const periodo = new Date().toISOString().slice(0, 7)
 
-      if (tokenData) {
-        const uploadUrl = `${process.env.NEXT_PUBLIC_APP_URL}/upload/${tokenData.token}`
-        await sendMessage(
-          chatId,
-          `📎 <b>Enlace de subida — ${empresa.nombre}</b>\n\n` +
-          `${uploadUrl}\n\n` +
-          `⏰ Expira en 15 minutos. Abre el enlace desde tu dispositivo y sube el comprobante.`
-        )
-      } else {
-        await sendMessage(chatId, '❌ Error al generar el enlace. Intenta nuevamente.')
-      }
-      break
-    }
+  // 7. "subir factura" → acción directa: generar enlace seguro de 15 min
+  const intent = await classifyIntent(text)
 
-    case 'query_igv': {
-      const { data: docs } = await admin
-        .from('documentos')
-        .select('igv')
-        .eq('empresa_id', empresa.id)
-        .eq('periodo', periodo)
-
-      const totalIGV = (docs ?? []).reduce(
-        (sum, d) => sum + ((d.igv as number) ?? 0),
-        0
-      )
-
-      await sendMessage(
-        chatId,
-        `📊 <b>IGV — ${periodo}</b>\n` +
-        `🏢 ${empresa.nombre}\n\n` +
-        `💰 Total IGV: <b>S/ ${totalIGV.toFixed(2)}</b>\n` +
-        `📄 Documentos registrados: ${docs?.length ?? 0}`
-      )
-      break
-    }
-
-    case 'query_vencimiento': {
-      const now = new Date()
-      const vencimiento = new Date(now.getFullYear(), now.getMonth() + 1, 15)
-      const diasRestantes = Math.ceil(
-        (vencimiento.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
-      )
-      const fechaStr = vencimiento.toLocaleDateString('es-PE', {
-        day: 'numeric',
-        month: 'long',
-        year: 'numeric',
+  if (intent === 'upload') {
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000)
+    const uploadToken = crypto.randomUUID()
+    const { data: tokenData } = await admin
+      .from('upload_tokens')
+      .insert({
+        token: uploadToken,
+        empresa_id: empresa.id,
+        user_id: profile.id,
+        expires_at: expiresAt.toISOString(),
+        usado: false,
       })
+      .select('token')
+      .single()
 
+    if (tokenData) {
+      const uploadUrl = `${process.env.NEXT_PUBLIC_APP_URL}/upload/${tokenData.token}`
       await sendMessage(
         chatId,
-        `📅 <b>Próxima declaración SUNAT</b>\n\n` +
-        `📆 Fecha referencial: <b>${fechaStr}</b>\n` +
-        `⏳ Faltan: <b>${diasRestantes} días</b>\n\n` +
-        `ℹ️ Verifica el cronograma exacto según el último dígito de tu RUC.`
+        `📎 <b>Enlace de subida — ${empresa.nombre}</b>\n\n` +
+        `${uploadUrl}\n\n` +
+        `⏰ Expira en 15 minutos. Ábrelo desde tu dispositivo, sube el comprobante ` +
+        `y Gemma 4 lo clasificará automáticamente.`
       )
-      break
+    } else {
+      await sendMessage(chatId, '❌ Error al generar el enlace. Intenta nuevamente.')
     }
+    return NextResponse.json({ ok: true })
+  }
 
-    case 'query_facturas': {
-      const { data: docs } = await admin
-        .from('documentos')
-        .select('estado')
-        .eq('empresa_id', empresa.id)
-        .eq('periodo', periodo)
+  // 8. Todo lo demás → chat inteligente con Gemma 4 sobre datos agregados
+  await sendTyping(chatId)
+  const ctx = await buildContext(admin, empresa, empresas, profile.nombre, periodo)
 
-      const total = docs?.length ?? 0
-      const confirmados = (docs ?? []).filter(d => d.estado === 'confirmado').length
-      const pendientes = total - confirmados
-
-      await sendMessage(
-        chatId,
-        `📋 <b>Documentos — ${periodo}</b>\n` +
-        `🏢 ${empresa.nombre}\n\n` +
-        `✅ Confirmados: <b>${confirmados}</b>\n` +
-        `⏳ Pendientes: <b>${pendientes}</b>\n` +
-        `📊 Total: <b>${total}</b>\n\n` +
-        `👉 <a href="${process.env.NEXT_PUBLIC_APP_URL}/documentos">Ver en dashboard</a>`
-      )
-      break
-    }
-
-    default:
-      await sendMessage(chatId, AYUDA_MESSAGE)
+  try {
+    const respuesta = await chatContador(text, ctx)
+    await sendMessage(chatId, respuesta)
+  } catch {
+    // Gemma no disponible → resumen de plantilla con los datos reales
+    await sendMessage(chatId, fallbackReply(ctx))
   }
 
   return NextResponse.json({ ok: true })

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const supabase = await createClient()
@@ -33,11 +34,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Empresa no encontrada' }, { status: 403 })
   }
 
+  const admin = createAdminClient()
   const expiresAt = new Date(Date.now() + 15 * 60 * 1000)
+  // Generar token en la app — no depender del DEFAULT de la BD
+  const token = crypto.randomUUID()
 
-  const { data: tokenData, error: tokenError } = await supabase
+  const { data: tokenData, error: tokenError } = await admin
     .from('upload_tokens')
     .insert({
+      token,
       empresa_id: empresa_id,
       user_id: user.id,
       expires_at: expiresAt.toISOString(),
@@ -47,6 +52,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     .single()
 
   if (!tokenData || tokenError) {
+    console.error('[upload-token] Insert error:', tokenError?.message, tokenError?.details)
     return NextResponse.json({ error: 'Error al crear el token' }, { status: 500 })
   }
 

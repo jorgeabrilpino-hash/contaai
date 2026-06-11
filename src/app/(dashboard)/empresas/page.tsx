@@ -1,7 +1,9 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
 import { Plus, Pencil, Trash2 } from 'lucide-react'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -12,6 +14,16 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Skeleton } from '@/components/ui/skeleton'
 import { EmpresaDialog } from './components/empresa-dialog'
 import type { Empresa } from '@/types'
@@ -31,13 +43,14 @@ const CONTRATO_LABEL: Record<string, string> = {
 }
 
 export default function EmpresasPage() {
+  const router = useRouter()
   const [empresas, setEmpresas] = useState<Empresa[]>([])
   const [loading, setLoading] = useState(true)
   const [empresaActiva, setEmpresaActiva] = useState<string | null>(null)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingEmpresa, setEditingEmpresa] = useState<Empresa | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
-  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [empresaToDelete, setEmpresaToDelete] = useState<Empresa | null>(null)
 
   const fetchEmpresas = useCallback(async () => {
     setLoading(true)
@@ -62,22 +75,17 @@ export default function EmpresasPage() {
     setDialogOpen(true)
   }
 
-  async function handleDelete(empresa: Empresa) {
-    setDeleteError(null)
-    if (
-      !window.confirm(
-        `¿Eliminar "${empresa.nombre}"? Esta acción no se puede deshacer.`
-      )
-    ) {
-      return
-    }
+  async function handleDeleteConfirmed() {
+    const empresa = empresaToDelete
+    if (!empresa) return
+    setEmpresaToDelete(null)
 
     setDeletingId(empresa.id)
     const res = await fetch(`/api/empresas/${empresa.id}`, { method: 'DELETE' })
     const json = await res.json()
 
     if (!res.ok) {
-      setDeleteError(json.error ?? 'Error al eliminar la empresa.')
+      toast.error(json.error ?? 'Error al eliminar la empresa.')
       setDeletingId(null)
       return
     }
@@ -88,17 +96,20 @@ export default function EmpresasPage() {
     }
 
     setDeletingId(null)
+    toast.success(`Empresa "${empresa.nombre}" eliminada`)
     fetchEmpresas()
+    router.refresh() // actualiza el switcher del sidebar (Server Component)
   }
 
   function handleSuccess() {
     fetchEmpresas()
+    router.refresh() // actualiza el switcher del sidebar (Server Component)
   }
 
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="border-b px-6 py-4 flex items-center justify-between">
+      <div className="border-b px-4 md:px-6 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold">Empresas</h1>
           <p className="text-sm text-muted-foreground">
@@ -112,13 +123,7 @@ export default function EmpresasPage() {
       </div>
 
       {/* Contenido */}
-      <div className="flex-1 overflow-auto p-6">
-        {deleteError && (
-          <div className="mb-4 p-3 rounded-md bg-destructive/10 text-destructive text-sm">
-            {deleteError}
-          </div>
-        )}
-
+      <div className="flex-1 overflow-auto p-4 md:p-6">
         {loading ? (
           <div className="space-y-2">
             {Array.from({ length: 3 }).map((_, i) => (
@@ -190,7 +195,7 @@ export default function EmpresasPage() {
                             variant="ghost"
                             size="icon"
                             className="h-8 w-8 text-destructive hover:text-destructive"
-                            onClick={() => handleDelete(empresa)}
+                            onClick={() => setEmpresaToDelete(empresa)}
                             disabled={deletingId === empresa.id}
                           >
                             <Trash2 className="h-3.5 w-3.5" />
@@ -212,6 +217,31 @@ export default function EmpresasPage() {
         onClose={() => setDialogOpen(false)}
         onSuccess={handleSuccess}
       />
+
+      {/* Confirmación de eliminación (sin window.confirm: no bloquea el hilo) */}
+      <AlertDialog
+        open={empresaToDelete !== null}
+        onOpenChange={(v) => !v && setEmpresaToDelete(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Eliminar empresa?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Se eliminará &quot;{empresaToDelete?.nombre}&quot;. Esta acción no
+              se puede deshacer.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteConfirmed}
+              className="bg-destructive text-white hover:bg-destructive/90"
+            >
+              Eliminar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

@@ -93,8 +93,6 @@ export type PCGEClassification = {
 
 export type DocumentProcessResult = {
   documento: Documento
-  extraccion: InvoiceExtraction
-  clasificacion: PCGEClassification
 }
 
 // ─────────────────────────────────────────────

@@ -113,14 +113,14 @@ function ReportesContent() {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="border-b px-6 py-4 flex items-center justify-between">
+      <div className="border-b px-4 md:px-6 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold">Reportes</h1>
           <p className="text-sm text-muted-foreground">
             Solo documentos confirmados
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
           <PeriodoSelector defaultValue={periodo} />
           {empresaId && (
             <Button asChild variant="outline" size="sm">
@@ -133,15 +133,15 @@ function ReportesContent() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-auto p-6 space-y-6">
+      <div className="flex-1 overflow-auto p-4 md:p-6 space-y-6">
         {!empresaId && !loading ? (
           <div className="rounded-lg border border-dashed p-10 text-center">
-            <p className="font-medium text-muted-foreground">Selecciona una empresa en el menú lateral</p>
+            <p className="font-medium text-muted-foreground">Selecciona una empresa en el menú</p>
           </div>
         ) : (
           <>
             {/* KPI Cards */}
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Card>
                 <CardHeader className="pb-2 flex flex-row items-center justify-between space-y-0">
                   <CardTitle className="text-sm font-medium text-muted-foreground">

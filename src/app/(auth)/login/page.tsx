@@ -1,7 +1,7 @@
 'use client'
 
-import { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { Suspense, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
@@ -15,8 +15,10 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const idleLogout = searchParams.get('reason') === 'idle'
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -50,6 +52,14 @@ export default function LoginPage() {
         <CardDescription>Ingresa tus credenciales para acceder</CardDescription>
       </CardHeader>
       <CardContent>
+        {idleLogout && (
+          <p
+            className="mb-4 text-sm text-amber-600 bg-amber-50 border border-amber-200 rounded-md px-3 py-2"
+            role="alert"
+          >
+            Tu sesión se cerró por inactividad. Vuelve a iniciar sesión.
+          </p>
+        )}
         <form onSubmit={handleSubmit} action="#" className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="email">Email</Label>
@@ -93,5 +103,13 @@ export default function LoginPage() {
         </form>
       </CardContent>
     </Card>
+  )
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<Card><CardContent className="py-8 text-center text-sm text-muted-foreground">Cargando...</CardContent></Card>}>
+      <LoginForm />
+    </Suspense>
   )
 }

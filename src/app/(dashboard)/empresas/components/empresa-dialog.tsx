@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -14,6 +15,7 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
@@ -111,6 +113,9 @@ export function EmpresaDialog({
     }
 
     setLoading(false)
+    toast.success(
+      isEditing ? 'Empresa actualizada correctamente' : 'Empresa creada correctamente'
+    )
     onSuccess()
     onClose()
   }
@@ -122,6 +127,11 @@ export function EmpresaDialog({
           <DialogTitle>
             {isEditing ? 'Editar empresa' : 'Nueva empresa'}
           </DialogTitle>
+          <DialogDescription>
+            {isEditing
+              ? 'Modifica los datos de la empresa seleccionada.'
+              : 'Completa los datos para registrar una nueva empresa en ContaAI.'}
+          </DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4 mt-2">

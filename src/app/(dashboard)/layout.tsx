@@ -28,8 +28,8 @@ export default async function DashboardLayout({
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
-      {/* Sidebar */}
-      <aside className="w-64 flex flex-col border-r bg-card shrink-0">
+      {/* Sidebar — solo desktop; en móvil se usa el menú del header */}
+      <aside className="hidden md:flex w-64 flex-col border-r bg-card shrink-0">
         {/* Logo */}
         <div className="px-6 py-5 border-b">
           <h1 className="text-xl font-bold tracking-tight">ContaAI</h1>

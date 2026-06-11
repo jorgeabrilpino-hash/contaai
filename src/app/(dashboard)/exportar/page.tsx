@@ -21,7 +21,7 @@ function ExportarContent() {
 
   const [empresaId, setEmpresaId] = useState<string | null>(null)
   const [empresaNombre, setEmpresaNombre] = useState<string>('')
-  const [totalConfirmados, setTotalConfirmados] = useState<number | null>(null)
+  const [totalConfirmados, setTotalConfirmados] = useState<number>(0)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -71,7 +71,7 @@ function ExportarContent() {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="border-b px-6 py-4 flex items-center justify-between">
+      <div className="border-b px-4 md:px-6 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold">Exportar</h1>
           <p className="text-sm text-muted-foreground">
@@ -81,7 +81,7 @@ function ExportarContent() {
         <PeriodoSelector defaultValue={periodo} />
       </div>
 
-      <div className="flex-1 overflow-auto p-6">
+      <div className="flex-1 overflow-auto p-4 md:p-6">
         {!empresaId && !loading ? (
           <div className="rounded-lg border border-dashed p-10 text-center">
             <p className="font-medium text-muted-foreground">
