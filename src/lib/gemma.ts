@@ -267,6 +267,7 @@ DATOS REALES del período ${ctx.periodo} (única fuente de verdad, NO inventes c
 LO QUE PUEDES HACER POR EL USUARIO (menciónalo solo si es relevante):
 - Si quiere subir una factura/boleta/foto: dile que escriba "subir factura" y le generas un enlace seguro de 15 minutos.
 - Cambiar de empresa: comando /empresa [nombre].
+- Ver qué cuenta está vinculada: /cuenta. Cerrar sesión en este chat: /cerrar.
 - Ver el dashboard: ${process.env.NEXT_PUBLIC_APP_URL}
 
 REGLAS ESTRICTAS:

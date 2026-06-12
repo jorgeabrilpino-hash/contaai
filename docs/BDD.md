@@ -158,6 +158,32 @@ Escenario: Fallback sin IA                                            ⚠️
 Escenario: Usuario no vinculado                                       ✅
   Cuando alguien sin vincular escribe al bot
   Entonces recibe instrucciones de vinculación (nunca datos)
+
+Escenario: Validar cuenta vinculada (/cuenta)                          ✅
+  Dado un contador vinculado
+  Cuando envía /cuenta
+  Entonces ve su nombre y su email ENMASCARADO (jo*****@gmail.com)
+  Y nunca el email completo
+
+Escenario: Cerrar sesión desde el chat (/cerrar)                       ⚠️
+  Dado un contador vinculado
+  Cuando envía /cerrar
+  Entonces su telegram_id se elimina del perfil
+  Y el chat pierde todo acceso a datos contables
+  Y recibe instrucciones para volver a vincular
+
+Escenario: Cambio de cuenta en el mismo Telegram                       ⚠️
+  Dado un Telegram vinculado a la cuenta A
+  Cuando envía /start con el código de la cuenta B
+  Entonces la cuenta A queda desvinculada automáticamente
+  Y el bot informa "esa sesión se cerró automáticamente"
+  Y las consultas siguientes responden con datos de B (nunca de A)
+
+Escenario: Dos personas distintas, dos cuentas                         ✅
+  Dado los contadores A y B con sus propios Telegram vinculados
+  Cuando cada uno consulta al bot
+  Entonces cada chat_id resuelve a SU perfil y SUS empresas
+  Y los datos jamás se cruzan (telegram_id es UNIQUE)
 ```
 
 ## Feature: Configuración — vinculación Telegram

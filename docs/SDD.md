@@ -100,6 +100,8 @@ Webhook con verificación de `x-telegram-bot-api-secret-token`.
 | `/start` | Saludo o instrucciones de vinculación |
 | `/start CODIGO` | Vincula `telegram_id` al perfil, invalida el código |
 | `/empresa [nombre]` | Cambia empresa activa (o lista empresas) |
+| `/cuenta` | Muestra la cuenta vinculada (nombre + email enmascarado) |
+| `/cerrar`, `/logout` | Cierra la sesión del chat (telegram_id → null) |
 | `/ayuda`, `/help` | Mensaje de ayuda |
 | "subir factura" (keywords) | Genera upload_token (15 min) + enlace |
 | **Cualquier otro mensaje** | **Chat inteligente**: Gemma 4 responde con contexto de datos agregados (IGV, base, docs, vencimiento). Fallback a plantilla si la IA falla. |
@@ -107,6 +109,14 @@ Webhook con verificación de `x-telegram-bot-api-secret-token`.
 **Vinculación (UX en /config):** botón "Conectar Telegram" → genera código
 único (se reutiliza si ya existe) → deep link `t.me/<bot>?start=CODIGO` →
 la página hace polling cada 4 s y pasa sola a "Conectado".
+
+**Identidad multi-usuario:** cada usuario de Telegram tiene un `chat_id` único
+asignado por Telegram (no falsificable). `profiles.telegram_id` es UNIQUE:
+un Telegram ↔ una cuenta ContaAI a la vez. Si el mismo Telegram vincula otra
+cuenta (`/start CODIGO` de otra cuenta), la sesión anterior se desvincula
+automáticamente y el bot informa el cambio. Tras vincular, el bot muestra
+nombre + email enmascarado como validación ("si no reconoces esta cuenta,
+envía /cerrar").
 
 ## 6. Modelo de datos
 

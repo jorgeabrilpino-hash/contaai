@@ -35,7 +35,16 @@ const AYUDA_MESSAGE =
   `💬 <i>"¿Qué cuenta PCGE uso para compras de gasolina?"</i>\n\n` +
   `📎 <b>Subir documentos:</b> escribe "subir factura" y te genero un enlace seguro de 15 minutos.\n\n` +
   `🏢 <b>Cambiar empresa:</b> /empresa [nombre]\n` +
+  `🔐 <b>Tu sesión:</b> /cuenta (ver cuenta vinculada) · /cerrar (cerrar sesión)\n` +
   `📱 Dashboard: ${process.env.NEXT_PUBLIC_APP_URL}`
+
+// Enmascara el email para mostrarlo sin exponerlo completo: jo*****@gmail.com
+function maskEmail(email: string | null | undefined): string {
+  if (!email) return 'sin email registrado'
+  const [user, domain] = email.split('@')
+  if (!domain) return '***'
+  return `${user.slice(0, 2)}${'*'.repeat(Math.max(user.length - 2, 1))}@${domain}`
+}
 
 // GET: register webhook with Telegram (call once after deploy)
 export async function GET(): Promise<NextResponse> {
@@ -159,15 +168,49 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         .single()
 
       if (profileToLink) {
-        await admin
+        // Cambio de cuenta: si este Telegram ya estaba vinculado a OTRA cuenta,
+        // desvincularla primero (telegram_id es UNIQUE — sin esto el update
+        // nuevo fallaría silenciosamente y el usuario creería que se vinculó).
+        const { data: cuentaAnterior } = await admin
+          .from('profiles')
+          .select('id, nombre')
+          .eq('telegram_id', chatId)
+          .neq('id', profileToLink.id)
+          .maybeSingle()
+
+        if (cuentaAnterior) {
+          await admin
+            .from('profiles')
+            .update({ telegram_id: null })
+            .eq('id', cuentaAnterior.id)
+        }
+
+        const { error: linkError } = await admin
           .from('profiles')
           .update({ telegram_id: chatId, telegram_token: null })
           .eq('id', profileToLink.id)
 
+        if (linkError) {
+          await sendMessage(
+            chatId,
+            '❌ No se pudo completar la vinculación. Genera un código nuevo en la app e intenta otra vez.'
+          )
+          return NextResponse.json({ ok: true })
+        }
+
+        // Identidad de la cuenta vinculada (email enmascarado como validación)
+        const { data: userData } = await admin.auth.admin.getUserById(profileToLink.id)
+        const emailMasked = maskEmail(userData?.user?.email)
+
         await sendMessage(
           chatId,
           `✅ ¡Cuenta vinculada correctamente!\n\n` +
-          `Hola <b>${profileToLink.nombre ?? 'Contador'}</b>, ya puedes usar ContaAI desde Telegram.\n\n` +
+          `👤 <b>${profileToLink.nombre ?? 'Contador'}</b>\n` +
+          `📧 <code>${emailMasked}</code>\n` +
+          (cuentaAnterior
+            ? `\n🔄 Este Telegram estaba vinculado a la cuenta de <b>${cuentaAnterior.nombre ?? 'otro usuario'}</b> — esa sesión se cerró automáticamente.\n`
+            : '') +
+          `\nSi no reconoces esta cuenta, envía /cerrar.\n\n` +
           AYUDA_MESSAGE
         )
       } else {
@@ -214,6 +257,41 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       '👋 ¡Hola! Para usar ContaAI necesitas vincular tu cuenta.\n\n' +
       INSTRUCCIONES_VINCULACION
     )
+    return NextResponse.json({ ok: true })
+  }
+
+  // 4b. /cuenta — validar qué cuenta está vinculada a este Telegram
+  if (text.startsWith('/cuenta')) {
+    const { data: userData } = await admin.auth.admin.getUserById(profile.id)
+    await sendMessage(
+      chatId,
+      `🔐 <b>Sesión activa en este chat</b>\n\n` +
+      `👤 ${profile.nombre ?? 'Contador'}\n` +
+      `📧 <code>${maskEmail(userData?.user?.email)}</code>\n\n` +
+      `Para cerrar sesión envía /cerrar.\n` +
+      `Para vincular otra cuenta: cierra sesión y usa el código de la otra cuenta desde ${process.env.NEXT_PUBLIC_APP_URL}/config`
+    )
+    return NextResponse.json({ ok: true })
+  }
+
+  // 4c. /cerrar — cerrar sesión del bot desde el propio chat
+  if (text.startsWith('/cerrar') || text.startsWith('/logout')) {
+    const { error: unlinkError } = await admin
+      .from('profiles')
+      .update({ telegram_id: null })
+      .eq('id', profile.id)
+
+    if (unlinkError) {
+      await sendMessage(chatId, '❌ No se pudo cerrar la sesión. Intenta de nuevo.')
+    } else {
+      await sendMessage(
+        chatId,
+        `👋 Sesión cerrada, <b>${profile.nombre ?? 'Contador'}</b>.\n\n` +
+        `Este chat ya no tiene acceso a ningún dato contable.\n\n` +
+        `Para volver a conectarte (con esta u otra cuenta):\n` +
+        INSTRUCCIONES_VINCULACION
+      )
+    }
     return NextResponse.json({ ok: true })
   }
 
