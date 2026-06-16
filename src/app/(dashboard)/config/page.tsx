@@ -18,21 +18,12 @@ interface ProfileState {
 }
 
 function QRCodeDisplay({ deepLink }: { deepLink: string }) {
-  // QR generado en cliente usando qrserver.com (sin dependencia npm).
-  // El dato codificado es el deep link público — mismo enlace visible en pantalla.
   const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=160x160&margin=8&data=${encodeURIComponent(deepLink)}`
-
   return (
     <div className="flex flex-col items-center gap-2">
       <div className="rounded-xl border bg-white p-2 shadow-sm">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={qrUrl}
-          alt="QR para conectar con Telegram"
-          width={160}
-          height={160}
-          className="block rounded-md"
-        />
+        <img src={qrUrl} alt="QR para conectar con Telegram" width={160} height={160} className="block rounded-md" />
       </div>
       <p className="text-xs text-muted-foreground flex items-center gap-1">
         <Smartphone className="h-3 w-3" />
@@ -56,17 +47,15 @@ export default function ConfigPage() {
     const supabase = createClient()
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return null
-
     const { data } = await supabase
       .from('profiles')
       .select('telegram_id, telegram_token')
       .eq('id', user.id)
       .single()
-
     if (!data) return null
     return {
-      telegramId: data.telegram_id,
-      telegramToken: data.telegram_token,
+      telegramId: data.telegram_id ?? null,
+      telegramToken: data.telegram_token ?? null,
     }
   }, [])
 
@@ -77,21 +66,41 @@ export default function ConfigPage() {
     })
   }, [loadProfile])
 
-  // Detectar vinculación automáticamente mientras el usuario escanea el QR.
+  // Mientras hay código pendiente: detectar vinculación por polling + evento de foco.
+  // El evento visibilitychange dispara en cuanto el usuario regresa de la app de
+  // Telegram al browser, consiguiendo una actualización casi inmediata sin esperar
+  // el próximo tick del intervalo de 2s.
   useEffect(() => {
     const waiting = !profile?.telegramId && !!profile?.telegramToken
     if (!waiting) {
       if (pollRef.current) clearInterval(pollRef.current)
       return
     }
-    pollRef.current = setInterval(async () => {
+
+    async function checkProfile() {
       const fresh = await loadProfile()
-      if (fresh?.telegramId) {
+      // Siempre actualizar el estado si el perfil existe — no solo cuando
+      // telegramId es truthy, para cubrir el caso donde el webhook borró
+      // telegram_token antes de que el cliente detecte el telegram_id.
+      if (fresh !== null) {
         setProfile(fresh)
       }
-    }, 4000)
+    }
+
+    // Poll cada 2 s (era 4 s) mientras espera conexión
+    pollRef.current = setInterval(checkProfile, 2000)
+
+    // Detectar regreso desde Telegram inmediatamente (sin esperar el intervalo)
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') void checkProfile()
+    }
+    document.addEventListener('visibilitychange', handleVisibility)
+    window.addEventListener('focus', checkProfile)
+
     return () => {
       if (pollRef.current) clearInterval(pollRef.current)
+      document.removeEventListener('visibilitychange', handleVisibility)
+      window.removeEventListener('focus', checkProfile)
     }
   }, [profile?.telegramId, profile?.telegramToken, loadProfile])
 
@@ -126,7 +135,6 @@ export default function ConfigPage() {
         .from('profiles')
         .update({ telegram_id: null, telegram_token: null })
         .eq('id', user.id)
-
       if (updateError) {
         setError('Error al desvincular. Intenta de nuevo.')
       } else {
@@ -151,9 +159,7 @@ export default function ConfigPage() {
     <div className="flex flex-col h-full">
       <div className="border-b px-4 md:px-6 py-4">
         <h1 className="text-xl font-semibold">Configuración</h1>
-        <p className="text-sm text-muted-foreground">
-          Gestiona tu cuenta y vinculaciones
-        </p>
+        <p className="text-sm text-muted-foreground">Gestiona tu cuenta y vinculaciones</p>
       </div>
 
       <div className="p-4 md:p-6 max-w-2xl space-y-6">
@@ -190,17 +196,16 @@ export default function ConfigPage() {
                 <div className="flex items-center gap-3 rounded-lg bg-green-50 border border-green-200 px-4 py-3">
                   <CheckCircle className="h-5 w-5 text-green-600 shrink-0" />
                   <div>
-                    <p className="text-sm font-medium text-green-800">
-                      Conectado con @{BOT_USERNAME}
-                    </p>
+                    <p className="text-sm font-medium text-green-800">Conectado con @{BOT_USERNAME}</p>
                     <p className="text-xs text-green-700 mt-0.5">
-                      Puedes chatear directamente en Telegram con tu asistente contable.
+                      Puedes chatear o enviar notas de voz con tu asistente contable.
                     </p>
                   </div>
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  Pregunta sobre IGV del mes, documentos pendientes, vencimientos SUNAT, dudas del PCGE,
-                  o escribe <code className="text-xs bg-muted px-1 rounded">subir factura</code> para generar un enlace de 15 minutos.
+                  Pregunta sobre IGV del mes, vencimientos SUNAT, dudas del PCGE,
+                  o escribe <code className="text-xs bg-muted px-1 rounded">subir factura</code> para un enlace de 15 min.
+                  También puedes enviar <b>notas de voz</b> de hasta 30 segundos.
                 </p>
                 <Separator />
                 <Button
@@ -215,37 +220,25 @@ export default function ConfigPage() {
                 </Button>
               </div>
             ) : profile?.telegramToken ? (
-              /* ── Esperando vinculación — muestra QR + botón ── */
+              /* ── Esperando vinculación ── */
               <div className="space-y-5">
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                   <Loader2 className="h-4 w-4 animate-spin shrink-0" />
-                  Esperando conexión... esta pantalla se actualizará sola.
+                  Esperando que conectes en Telegram...
                 </div>
 
-                {/* Toggle QR / Botón */}
                 <div className="flex gap-2">
-                  <Button
-                    variant={showQR ? 'default' : 'outline'}
-                    size="sm"
-                    onClick={() => setShowQR(true)}
-                    className="gap-1.5"
-                  >
+                  <Button variant={showQR ? 'default' : 'outline'} size="sm" onClick={() => setShowQR(true)} className="gap-1.5">
                     <QrCode className="h-3.5 w-3.5" />
                     QR
                   </Button>
-                  <Button
-                    variant={!showQR ? 'default' : 'outline'}
-                    size="sm"
-                    onClick={() => setShowQR(false)}
-                    className="gap-1.5"
-                  >
+                  <Button variant={!showQR ? 'default' : 'outline'} size="sm" onClick={() => setShowQR(false)} className="gap-1.5">
                     <Send className="h-3.5 w-3.5" />
                     Enlace
                   </Button>
                 </div>
 
                 {showQR && deepLink ? (
-                  /* ── Modo QR ── */
                   <div className="flex flex-col sm:flex-row items-start gap-6">
                     <QRCodeDisplay deepLink={deepLink} />
                     <div className="space-y-2 text-sm text-muted-foreground">
@@ -257,13 +250,10 @@ export default function ConfigPage() {
                         <li>Telegram se abre con el bot listo</li>
                         <li>Pulsa <strong>START</strong></li>
                       </ol>
-                      <p className="text-xs pt-1">
-                        También puedes tocar el botón de enlace para abrirlo directamente.
-                      </p>
+                      <p className="text-xs pt-1">Esta página se actualizará automáticamente.</p>
                     </div>
                   </div>
                 ) : (
-                  /* ── Modo enlace ── */
                   <div className="space-y-3">
                     {deepLink && (
                       <Button asChild className="w-full sm:w-auto gap-2">
@@ -273,28 +263,17 @@ export default function ConfigPage() {
                         </a>
                       </Button>
                     )}
-
                     <div className="rounded-lg border bg-muted/50 p-4 space-y-2">
                       <p className="text-xs text-muted-foreground">
-                        ¿No funciona? Envía este mensaje a{' '}
+                        ¿No funciona el botón? Envía este mensaje a{' '}
                         <span className="font-medium">@{BOT_USERNAME}</span>:
                       </p>
                       <div className="flex items-center gap-2 rounded-md border bg-background px-3 py-2">
                         <code className="flex-1 text-sm font-mono break-all">
                           /start {profile.telegramToken}
                         </code>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7 shrink-0"
-                          onClick={copyToClipboard}
-                          title="Copiar comando"
-                        >
-                          {copied ? (
-                            <CheckCircle className="h-3.5 w-3.5 text-green-500" />
-                          ) : (
-                            <Copy className="h-3.5 w-3.5" />
-                          )}
+                        <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={copyToClipboard} title="Copiar">
+                          {copied ? <CheckCircle className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
                         </Button>
                       </div>
                     </div>
@@ -305,24 +284,17 @@ export default function ConfigPage() {
               /* ── No conectado ── */
               <div className="space-y-4">
                 <p className="text-sm text-muted-foreground">
-                  Conecta tu cuenta de Telegram para chatear con tu asistente
-                  contable: consultas de IGV, vencimientos SUNAT, dudas del PCGE
-                  y enlaces seguros para subir comprobantes desde el celular.
+                  Conecta tu Telegram para chatear con tu asistente contable: IGV del mes,
+                  vencimientos SUNAT, dudas PCGE, notas de voz y enlaces para subir comprobantes.
                 </p>
                 <Button onClick={handleConnect} disabled={generating} className="gap-2">
-                  {generating ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <QrCode className="h-4 w-4" />
-                  )}
+                  {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <QrCode className="h-4 w-4" />}
                   {generating ? 'Preparando QR...' : 'Conectar Telegram'}
                 </Button>
               </div>
             )}
 
-            {error && (
-              <p className="text-sm text-destructive">{error}</p>
-            )}
+            {error && <p className="text-sm text-destructive">{error}</p>}
           </CardContent>
         </Card>
       </div>
