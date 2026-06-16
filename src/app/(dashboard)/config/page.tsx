@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { CheckCircle, Copy, Unlink, Send, Loader2 } from 'lucide-react'
+import { CheckCircle, Copy, Unlink, Send, Loader2, QrCode, Smartphone } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -17,12 +17,38 @@ interface ProfileState {
   telegramToken: string | null
 }
 
+function QRCodeDisplay({ deepLink }: { deepLink: string }) {
+  // QR generado en cliente usando qrserver.com (sin dependencia npm).
+  // El dato codificado es el deep link público — mismo enlace visible en pantalla.
+  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=160x160&margin=8&data=${encodeURIComponent(deepLink)}`
+
+  return (
+    <div className="flex flex-col items-center gap-2">
+      <div className="rounded-xl border bg-white p-2 shadow-sm">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={qrUrl}
+          alt="QR para conectar con Telegram"
+          width={160}
+          height={160}
+          className="block rounded-md"
+        />
+      </div>
+      <p className="text-xs text-muted-foreground flex items-center gap-1">
+        <Smartphone className="h-3 w-3" />
+        Escanea con la cámara de tu celular
+      </p>
+    </div>
+  )
+}
+
 export default function ConfigPage() {
   const [profile, setProfile] = useState<ProfileState | null>(null)
   const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState(false)
   const [unlinking, setUnlinking] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [showQR, setShowQR] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -51,9 +77,7 @@ export default function ConfigPage() {
     })
   }, [loadProfile])
 
-  // Mientras hay un código pendiente, detectar automáticamente la
-  // vinculación: cuando el usuario toca "Conectar" en Telegram, esta
-  // pantalla pasa sola a "Conectado" sin recargar.
+  // Detectar vinculación automáticamente mientras el usuario escanea el QR.
   useEffect(() => {
     const waiting = !profile?.telegramId && !!profile?.telegramToken
     if (!waiting) {
@@ -82,6 +106,7 @@ export default function ConfigPage() {
           telegramId: prev?.telegramId ?? null,
           telegramToken: json.token,
         }))
+        setShowQR(true)
       } else {
         setError(json.error ?? 'Error al generar el código.')
       }
@@ -99,7 +124,7 @@ export default function ConfigPage() {
     if (user) {
       const { error: updateError } = await supabase
         .from('profiles')
-        .update({ telegram_id: null })
+        .update({ telegram_id: null, telegram_token: null })
         .eq('id', user.id)
 
       if (updateError) {
@@ -162,18 +187,20 @@ export default function ConfigPage() {
             ) : profile?.telegramId ? (
               /* ── Conectado ── */
               <div className="space-y-3">
+                <div className="flex items-center gap-3 rounded-lg bg-green-50 border border-green-200 px-4 py-3">
+                  <CheckCircle className="h-5 w-5 text-green-600 shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium text-green-800">
+                      Conectado con @{BOT_USERNAME}
+                    </p>
+                    <p className="text-xs text-green-700 mt-0.5">
+                      Puedes chatear directamente en Telegram con tu asistente contable.
+                    </p>
+                  </div>
+                </div>
                 <p className="text-sm text-muted-foreground">
-                  Tu cuenta está vinculada a{' '}
-                  <a
-                    href={`https://t.me/${BOT_USERNAME}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="font-medium text-primary hover:underline"
-                  >
-                    @{BOT_USERNAME}
-                  </a>
-                  . Puedes preguntarle por el IGV del mes, documentos pendientes,
-                  dudas contables, o pedirle un enlace para subir facturas.
+                  Pregunta sobre IGV del mes, documentos pendientes, vencimientos SUNAT, dudas del PCGE,
+                  o escribe <code className="text-xs bg-muted px-1 rounded">subir factura</code> para generar un enlace de 15 minutos.
                 </p>
                 <Separator />
                 <Button
@@ -188,46 +215,91 @@ export default function ConfigPage() {
                 </Button>
               </div>
             ) : profile?.telegramToken ? (
-              /* ── Esperando vinculación ── */
-              <div className="space-y-4">
+              /* ── Esperando vinculación — muestra QR + botón ── */
+              <div className="space-y-5">
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <Loader2 className="h-4 w-4 animate-spin shrink-0" />
                   Esperando conexión... esta pantalla se actualizará sola.
                 </div>
 
-                {deepLink && (
-                  <Button asChild className="w-full sm:w-auto gap-2">
-                    <a href={deepLink} target="_blank" rel="noopener noreferrer">
-                      <Send className="h-4 w-4" />
-                      Abrir Telegram y conectar
-                    </a>
+                {/* Toggle QR / Botón */}
+                <div className="flex gap-2">
+                  <Button
+                    variant={showQR ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => setShowQR(true)}
+                    className="gap-1.5"
+                  >
+                    <QrCode className="h-3.5 w-3.5" />
+                    QR
                   </Button>
-                )}
-
-                <div className="rounded-lg border bg-muted/50 p-4 space-y-2">
-                  <p className="text-xs text-muted-foreground">
-                    ¿No funciona el botón? Envía este mensaje a{' '}
-                    <span className="font-medium">@{BOT_USERNAME}</span>:
-                  </p>
-                  <div className="flex items-center gap-2 rounded-md border bg-background px-3 py-2">
-                    <code className="flex-1 text-sm font-mono break-all">
-                      /start {profile.telegramToken}
-                    </code>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 shrink-0"
-                      onClick={copyToClipboard}
-                      title="Copiar comando"
-                    >
-                      {copied ? (
-                        <CheckCircle className="h-3.5 w-3.5 text-green-500" />
-                      ) : (
-                        <Copy className="h-3.5 w-3.5" />
-                      )}
-                    </Button>
-                  </div>
+                  <Button
+                    variant={!showQR ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => setShowQR(false)}
+                    className="gap-1.5"
+                  >
+                    <Send className="h-3.5 w-3.5" />
+                    Enlace
+                  </Button>
                 </div>
+
+                {showQR && deepLink ? (
+                  /* ── Modo QR ── */
+                  <div className="flex flex-col sm:flex-row items-start gap-6">
+                    <QRCodeDisplay deepLink={deepLink} />
+                    <div className="space-y-2 text-sm text-muted-foreground">
+                      <p className="font-medium text-foreground">¿Cómo conectar?</p>
+                      <ol className="space-y-1.5 list-decimal list-inside text-sm">
+                        <li>Abre la cámara de tu celular</li>
+                        <li>Apunta al código QR</li>
+                        <li>Toca el enlace que aparece</li>
+                        <li>Telegram se abre con el bot listo</li>
+                        <li>Pulsa <strong>START</strong></li>
+                      </ol>
+                      <p className="text-xs pt-1">
+                        También puedes tocar el botón de enlace para abrirlo directamente.
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  /* ── Modo enlace ── */
+                  <div className="space-y-3">
+                    {deepLink && (
+                      <Button asChild className="w-full sm:w-auto gap-2">
+                        <a href={deepLink} target="_blank" rel="noopener noreferrer">
+                          <Send className="h-4 w-4" />
+                          Abrir Telegram y conectar
+                        </a>
+                      </Button>
+                    )}
+
+                    <div className="rounded-lg border bg-muted/50 p-4 space-y-2">
+                      <p className="text-xs text-muted-foreground">
+                        ¿No funciona? Envía este mensaje a{' '}
+                        <span className="font-medium">@{BOT_USERNAME}</span>:
+                      </p>
+                      <div className="flex items-center gap-2 rounded-md border bg-background px-3 py-2">
+                        <code className="flex-1 text-sm font-mono break-all">
+                          /start {profile.telegramToken}
+                        </code>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 shrink-0"
+                          onClick={copyToClipboard}
+                          title="Copiar comando"
+                        >
+                          {copied ? (
+                            <CheckCircle className="h-3.5 w-3.5 text-green-500" />
+                          ) : (
+                            <Copy className="h-3.5 w-3.5" />
+                          )}
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
               /* ── No conectado ── */
@@ -241,9 +313,9 @@ export default function ConfigPage() {
                   {generating ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
                   ) : (
-                    <Send className="h-4 w-4" />
+                    <QrCode className="h-4 w-4" />
                   )}
-                  {generating ? 'Preparando...' : 'Conectar Telegram'}
+                  {generating ? 'Preparando QR...' : 'Conectar Telegram'}
                 </Button>
               </div>
             )}

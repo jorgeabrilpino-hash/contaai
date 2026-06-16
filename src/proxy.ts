@@ -27,70 +27,93 @@ export async function proxy(request: NextRequest) {
     }
   )
 
-  // getUser() refresca el token automáticamente.
-  // Si el refresh_token es inválido (cookies viejas/expiradas), lo capturamos
-  // y tratamos como sesión no autenticada — evita el error en logs.
   let user: { id: string } | null = null
   try {
     const { data, error } = await supabase.auth.getUser()
     if (!error) user = data.user
   } catch {
-    // Refresh token inválido u otro error de red — se trata como sin sesión
+    // Refresh token inválido u otro error de red — sin sesión
   }
 
   const { pathname } = request.nextUrl
+  const isAuthRoute = pathname.startsWith('/login') || pathname.startsWith('/register')
+  const isLanding = pathname === '/'
+  const isPublicRoute = isLanding || isAuthRoute
 
-  const isAuthRoute =
-    pathname.startsWith('/login') || pathname.startsWith('/register')
-
-  // "/" es pública (landing page) — no requiere autenticación
-  const isPublicRoute = pathname === '/' || isAuthRoute
-
-  // Sin sesión y tratando de acceder a ruta protegida → /login
-  if (!user && !isPublicRoute) {
-    const url = request.nextUrl.clone()
-    url.pathname = '/login'
-    // Limpiar cookies de sesión inválidas para no generar errores en bucle
-    const redirectRes = NextResponse.redirect(url)
-    redirectRes.cookies.delete('sb-access-token')
-    redirectRes.cookies.delete('sb-refresh-token')
-    redirectRes.cookies.delete('last_active')
-    return redirectRes
+  // ── Sin sesión ─────────────────────────────────────────────────────────────
+  if (!user) {
+    if (!isPublicRoute) {
+      // Ruta protegida sin sesión → /login
+      const url = request.nextUrl.clone()
+      url.pathname = '/login'
+      const redirectRes = NextResponse.redirect(url)
+      redirectRes.cookies.delete('sb-access-token')
+      redirectRes.cookies.delete('sb-refresh-token')
+      redirectRes.cookies.delete('last_active')
+      return redirectRes
+    }
+    // Ruta pública sin sesión → mostrar normalmente
+    return supabaseResponse
   }
 
-  // Con sesión y en ruta de auth → dashboard
-  if (user && isAuthRoute) {
+  // ── Con sesión ─────────────────────────────────────────────────────────────
+  const lastActive = request.cookies.get('last_active')?.value
+  const now = Date.now()
+
+  if (isLanding) {
+    // Landing page con sesión:
+    // - Si last_active existe y es reciente → el usuario está activo → /dashboard
+    // - Si last_active ausente (browser cerrado ≥30 min) → sign out silencioso
+    // - Si last_active existe pero expiró → sign out
+    if (lastActive) {
+      const elapsed = now - parseInt(lastActive, 10)
+      if (elapsed > IDLE_TIMEOUT_MS) {
+        // Sesión expirada por inactividad
+        await supabase.auth.signOut()
+        supabaseResponse.cookies.delete('last_active')
+        return supabaseResponse
+      }
+      // Sesión válida: redirigir al dashboard
+      const url = request.nextUrl.clone()
+      url.pathname = '/dashboard'
+      return NextResponse.redirect(url)
+    } else {
+      // Sin last_active: el browser fue cerrado o la cookie expiró.
+      // Sign out silencioso para que "Ya tengo cuenta" lleve al login real.
+      await supabase.auth.signOut()
+      return supabaseResponse
+    }
+  }
+
+  if (isAuthRoute) {
+    // En login/register con sesión activa → /dashboard
     const url = request.nextUrl.clone()
     url.pathname = '/dashboard'
     return NextResponse.redirect(url)
   }
 
-  // Idle timeout: cerrar sesión automáticamente tras 30 min de inactividad
-  if (user && !isPublicRoute) {
-    const lastActive = request.cookies.get('last_active')?.value
-    const now = Date.now()
-
-    if (lastActive) {
-      const elapsed = now - parseInt(lastActive, 10)
-      if (elapsed > IDLE_TIMEOUT_MS) {
-        await supabase.auth.signOut()
-        const url = request.nextUrl.clone()
-        url.pathname = '/login'
-        url.searchParams.set('reason', 'idle')
-        const redirectRes = NextResponse.redirect(url)
-        redirectRes.cookies.delete('last_active')
-        return redirectRes
-      }
+  // ── Rutas protegidas con sesión ────────────────────────────────────────────
+  if (lastActive) {
+    const elapsed = now - parseInt(lastActive, 10)
+    if (elapsed > IDLE_TIMEOUT_MS) {
+      await supabase.auth.signOut()
+      const url = request.nextUrl.clone()
+      url.pathname = '/login'
+      url.searchParams.set('reason', 'idle')
+      const redirectRes = NextResponse.redirect(url)
+      redirectRes.cookies.delete('last_active')
+      return redirectRes
     }
-
-    // Actualizar timestamp de última actividad en cada request
-    supabaseResponse.cookies.set('last_active', String(now), {
-      httpOnly: true,
-      sameSite: 'lax',
-      path: '/',
-      maxAge: IDLE_TIMEOUT_MS / 1000,
-    })
   }
+  // Sin last_active en ruta protegida = recién se logeó → no cerrar sesión,
+  // solo establecer el cookie para el tracking de inactividad.
+
+  supabaseResponse.cookies.set('last_active', String(now), {
+    httpOnly: true,
+    sameSite: 'lax',
+    path: '/',
+    maxAge: IDLE_TIMEOUT_MS / 1000,
+  })
 
   return supabaseResponse
 }
@@ -99,13 +122,10 @@ export const config = {
   matcher: [
     /*
      * Aplica a todas las rutas excepto:
-     * - _next/static (archivos estáticos)
-     * - _next/image (optimización de imágenes)
-     * - favicon.ico
+     * - _next/static / _next/image / favicon.ico
      * - /upload/* (páginas públicas de upload con token)
-     * - /api/* (TODAS las API routes: validan auth por sí mismas y deben
-     *   responder JSON con 401/403 — un redirect 307 a /login rompe los
-     *   fetch del cliente, p.ej. la subida de documentos)
+     * - /api/* (todas las API routes responden JSON con 401/403,
+     *   nunca 307 a /login — incluirlas causaba el bug de "no puedo subir imágenes")
      */
     '/((?!_next/static|_next/image|favicon.ico|upload|api).*)',
   ],
